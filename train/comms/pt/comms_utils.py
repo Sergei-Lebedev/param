@@ -649,6 +649,7 @@ class paramCommsBench(ABC):
     def dcheck(self, commsParams, curSize, tensor):
         expRes = self.initVal
         if (commsParams.collective == "all_reduce") or (
+            commsParams.collective == "reduce_scatter") or (
             self.backendFuncs.get_global_rank() == commsParams.srcOrDst
             and commsParams.collective == "reduce"
         ):
@@ -770,11 +771,18 @@ class paramCommsBench(ABC):
             opTensor = ipTensor
             ipTensor = []
             for _ in range(world_size):
-                ipTensor.append(
-                    self.backendFuncs.alloc_random(
-                        [numElementsOut], curDevice, dtype, scaleFactor
+                if commsParams.dcheck == 1:
+                    ipTensor.append(
+                        self.backendFuncs.alloc_ones(
+                            [numElementsOut], curDevice, dtype, scaleFactor=self.initVal
+                        )
                     )
-                )
+                else:
+                    ipTensor.append(
+                        self.backendFuncs.alloc_random(
+                            [numElementsOut], curDevice, dtype, scaleFactor
+                        )
+                    )
         elif commOp in ("all_to_all", "pt2pt"):
             # pt2pt or out-of-place collectives
             opTensor = self.backendFuncs.alloc_random(
