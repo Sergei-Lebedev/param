@@ -621,6 +621,12 @@ class PyTorchDistBackend(backendFunctions):
                     raise RuntimeError("Unable to import initialize_ucc_plugin")
                 else:
                     initialize_ucc_plugin(backend)
+        if backend == "fairring":
+            # try OSS/setup.py
+            try:
+                import fairring  # noqa
+            except ImportError:
+                raise RuntimeError("Unable to import fairring plugin")
 
     def initialize_backend(self, master_ip, master_port, backend="gloo"):
         # Set CUDA device before initializing backend
