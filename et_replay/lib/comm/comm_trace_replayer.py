@@ -7,6 +7,7 @@ import torch
 
 from ..utils import read_mpi_env_vars
 from .backend import BaseBackend, CollArgs, PyTorchDistBackend
+from .backend.base_backend import BackendBootstrapInfo
 from .comm_op_args import CommOpArgs
 from .comm_tensor_allocator import CommTensorAllocator
 from .comm_trace_reader import CommTraceReader
@@ -57,16 +58,19 @@ class CommTraceReplayer:
     behaviors of AI backends.
     """
 
-    def __init__(self, args):
+    def __init__(self, args: argparse.Namespace):
         (world_size, local_size, global_rank, local_rank) = read_mpi_env_vars()
         comm_trace_replay_args = CommTraceReplayArgs(args)
+        backend_bootstrap_info = BackendBootstrapInfo()
+        backend_bootstrap_info.master_ip = args.master_ip
+        backend_bootstrap_info.master_port = args.master_port
+        backend_bootstrap_info.world_rank = global_rank
+        backend_bootstrap_info.world_size = world_size
+        backend_bootstrap_info.local_size = local_size
+        backend_bootstrap_info.local_rank = local_rank
+
         self.init_backend(
-            args.master_ip,
-            args.master_port,
-            world_size,
-            local_size,
-            global_rank,
-            local_rank,
+            backend_bootstrap_info,
             comm_trace_replay_args,
         )
         self.init_replay(comm_trace_replay_args, args)
@@ -141,12 +145,7 @@ class CommTraceReplayer:
 
     def init_backend(
         self,
-        master_ip,
-        master_port,
-        world_size,
-        local_size,
-        global_rank,
-        local_rank,
+        bootstrap_info: BackendBootstrapInfo,
         comm_trace_replay_args,
     ) -> None:
         """
@@ -161,17 +160,19 @@ class CommTraceReplayer:
         """
         # init backend and corresponding function pointers
         if comm_trace_replay_args.network_stack == "pytorch-dist":
-            self.backend = PyTorchDistBackend(bootstrap_info, comm_trace_replay_args)
+            comm_params = {"use_ext_dist": comm_trace_replay_args.use_ext_dist,
+                           "backend": comm_trace_replay_args.backend,
+                           "init_method": comm_trace_replay_args.init_method}
+            self.backend = PyTorchDistBackend(bootstrap_info, comm_params)
         else:
             logger.error("Unsupported NW stack! ")
             comm_utils.gracefulExit()
 
-        self.backend.initialize_backend(
-            master_ip,
-            master_port,
-            backend=comm_trace_replay_args.backend,
-        )
-        self.backend.sayHello()
+        self.backend.initialize_backend()
+        self.backend.say_hello(bootstrap_info.world_rank,
+                               bootstrap_info.local_rank,
+                               bootstrap_info.world_size,
+                               bootstrap_info.master_ip)
 
     def init_replay(
         self, comm_trace_replay_args: CommTraceReplayArgs, args: argparse.Namespace

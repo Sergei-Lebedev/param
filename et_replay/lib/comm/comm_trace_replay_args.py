@@ -30,7 +30,7 @@ class CommTraceReplayArgs:
         Args:
             args: Argument parser object with necessary parameters.
         """
-        self.network_stack: str = args.network_stack
+        self.network_stack: str = args.nw_stack
         self.dtype: str = args.dtype
         self.backend: str = args.backend
         self.device: str = args.device

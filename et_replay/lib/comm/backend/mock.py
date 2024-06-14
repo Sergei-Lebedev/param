@@ -3,7 +3,9 @@ from typing import List
 import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup
+from typing import Dict
 
+from .base_backend import BaseBackend, BackendBootstrapInfo
 from .base_backend import BaseBackend
 from .coll_args import CollArgs
 
@@ -29,7 +31,9 @@ class MockBackend(BaseBackend):
         }
 
     def initialize_backend(
-        self, master_ip: str, master_port: str, backend: str = "gloo"
+        self,
+        bootstrap_info: BackendBootstrapInfo,
+        comm_params: Dict
     ) -> None:
         """
         Initializes the backend for distributed operations.

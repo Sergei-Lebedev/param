@@ -7,11 +7,12 @@ import argparse
 import logging
 import os
 import sys
-from typing import Any, List, Namespace
+from argparse import Namespace
+from typing import Any, List
 
 import torch
 from et_replay.comm import CommTraceReplayer
-
+from et_replay.comm.backend.base_backend import SupportedNwstacks
 
 def parse_arguments() -> Namespace:
     """
@@ -284,9 +285,9 @@ def validate_arguments(
               the program on invalid arguments.
     """
     # Validate network stack
-    if args.nw_stack not in args.supportedNwstacks:
+    if args.nw_stack not in SupportedNwstacks:
         graceful_exit(
-            f"Specified backend: {args.nw_stack} is not one of the supported backends: {args.supportedNwstacks}."
+            f"Specified backend: {args.nw_stack} is not one of the supported backends: {SupportedNwstacks}."
         )
 
     # Set logging level
@@ -304,11 +305,11 @@ def validate_arguments(
     check_master_env("MASTER_ADDR", args.master_ip, "127.0.0.1")
     check_master_env("MASTER_PORT", args.master_port, "29500")
 
-    # Specific checks for trace replay
-    if not (os.path.isfile(args.trace_file) or os.path.isdir(args.trace_file)):
-        graceful_exit(
-            f"The specified trace path '{args.trace_file}' is neither a file nor a directory."
-        )
+    # # Specific checks for trace replay
+    # if not (os.path.isfile(args.trace_file) or os.path.isdir(args.trace_file)):
+    #     graceful_exit(
+    #         f"The specified trace path '{args.trace_file}' is neither a file nor a directory."
+    #     )
 
     if args.trace_type not in valid_trace_types:
         graceful_exit(
@@ -347,7 +348,7 @@ def main() -> None:
     args = parse_arguments()
     validate_arguments(args)
 
-    comm_replayer = CommTraceReplayer()
+    comm_replayer = CommTraceReplayer(args)
     comm_replayer.run(comm_trace_replay_args)
 
 

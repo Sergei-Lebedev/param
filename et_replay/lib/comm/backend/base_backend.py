@@ -12,12 +12,26 @@ from torch.distributed import ProcessGroup
 
 from .coll_args import CollArgs
 
+
+SupportedNwstacks=["pytorch-dist"]
+
 SupportedP2pOps = [
     "send",
     "recv",
     "isend",
     "irecv",
 ]
+
+class BackendBootstrapInfo:
+    """Class holding parameters related to backend bootstrap."""
+
+    def __init__(self) -> None:
+        self.master_ip = ""
+        self.master_port = ""
+        self.world_size = 0
+        self.world_rank = 0
+        self.local_size = 0
+        self.local_rank = 0
 
 
 class BaseBackend(ABC):

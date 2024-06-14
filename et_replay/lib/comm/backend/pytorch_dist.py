@@ -13,7 +13,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup
 
-from .base_backend import BaseBackend
+from .base_backend import BaseBackend, BackendBootstrapInfo
 from .coll_args import CollArgs
 
 try:
@@ -63,25 +63,16 @@ class PyTorchDistBackend(BaseBackend):
     PyTorch implementation of the BaseBackend for distributed operations.
     """
 
-    def __init__(
-        self,
-        master_ip: str,
-        master_port: str,
-        world_size: int,
-        local_size: int,
-        global_rank: int,
-        local_rank: int,
-        comm_params: Dict,
-    ) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.master_ip = master_ip
-        self.master_port = master_port
-        self.world_size = world_size
-        self.local_size = local_size
-        self.global_rank = global_rank
-        self.local_rank = local_rank
-        self.comm_params = comm_params
-        self.use_ext_dist = comm_params.get("use_ext_dist", False)
+        # self.master_ip = bootstrap_info.master_ip
+        # self.master_port = bootstrap_info.master_port
+        # self.world_size = bootstrap_info.world_size
+        # self.local_size = bootstrap_info.local_size
+        # self.global_rank = bootstrap_info.world_rank
+        # self.local_rank = bootstrap_info.local_rank
+        # self.comm_params = comm_params
+        # self.use_ext_dist = comm_params.get("use_ext_dist", False)
         self.collective_func: Dict[str, Callable] = {
             "wait": self.wait,
             "send": self.send,
@@ -91,30 +82,45 @@ class PyTorchDistBackend(BaseBackend):
             "batch_isend_irecv": self.batch_isend_irecv,
             "pt2pt": self.noop,
         }
-        backend = comm_params.get("backend", "gloo")
-        if backend == "ucc":
-            try:
-                import torch_ucc
-            except ImportError:
-                try:
-                    from ucc_plugin import initialize_ucc_plugin
+        # backend = comm_params.get("backend", "gloo")
+        # if backend == "ucc":
+        #     try:
+        #         import torch_ucc
+        #     except ImportError:
+        #         try:
+        #             from ucc_plugin import initialize_ucc_plugin
 
-                    initialize_ucc_plugin(backend)
-                except ImportError:
-                    raise RuntimeError("Unable to import initialize_ucc_plugin")
+        #             initialize_ucc_plugin(backend)
+        #         except ImportError:
+        #             raise RuntimeError("Unable to import initialize_ucc_plugin")
+        # if backend == "fairring":
+        #     try:
+        #         import fairring
+        #     except ImportError:
+        #         raise RuntimeError("Unable to import Fairring")
+
+    def initialize_backend(
+        self,
+        bootstrap_info: BackendBootstrapInfo,
+        comm_params: Dict,
+        eager_mode: bool = False,
+    ) -> None:
+        self.master_ip = bootstrap_info.master_ip
+        self.master_port = bootstrap_info.master_port
+        self.world_size = bootstrap_info.world_size
+        self.local_size = bootstrap_info.local_size
+        self.global_rank = bootstrap_info.world_rank
+        self.local_rank = bootstrap_info.local_rank
+        self.comm_params = comm_params
+        self.use_ext_dist = comm_params.get("use_ext_dist", False)
+
+        backend = comm_params.get("backend", "gloo")
         if backend == "fairring":
             try:
                 import fairring
             except ImportError:
                 raise RuntimeError("Unable to import Fairring")
 
-    def initialize_backend(
-        self,
-        master_ip: str,
-        master_port: str,
-        backend: str = "gloo",
-        eager_mode: bool = False,
-    ) -> None:
         self.set_device(self.local_rank, self.global_rank)
         if has_ext_dist and self.use_ext_dist:
             extend_distributed.init_distributed(
@@ -128,7 +134,7 @@ class PyTorchDistBackend(BaseBackend):
             self.use_ext_dist = False
 
         if self.tcp_store is None:
-            self.initialize_tcpstore(master_ip, master_port)
+            self.initialize_tcpstore(self.master_ip, self.master_port)
 
         if not dist.is_initialized():
             dist.init_process_group(
@@ -143,6 +149,7 @@ class PyTorchDistBackend(BaseBackend):
                     torch.device(f"cuda:{self.local_rank}") if eager_mode else None
                 ),
             )
+
         self.groups = {0: self.get_default_group()}
         self.num_pgs = len(self.groups)
         self.round_robin_group = cycle(list(self.groups.values()))
@@ -378,6 +385,12 @@ class PyTorchDistBackend(BaseBackend):
 
         if ret_flag:
             return work
+
+    def barrier(self, collective_args: CollArgs, name: str = "dummy") -> None:
+        pass
+
+    def get_reduce_op(self, op_name: str) -> dist.ReduceOp:
+        pass
 
     def gather(
         self, collective_args: CollArgs, ret_flag: bool = False
