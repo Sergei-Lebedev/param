@@ -41,7 +41,7 @@ import torch
 from torch._C._distributed_c10d import ProcessGroup  # @manual
 
 from .param_profile import paramTimer
-from .pytorch_backend_utils import (
+from .backend.base_backend import (
     backendFunctions,
     collectiveArgsHolder,
     customized_backend,
@@ -73,49 +73,6 @@ def gracefulExit(args: Any = 0) -> None:
     sys.exit(args)
 
 
-def parsesize(ipValue: str) -> int:
-    """
-    nccl-tests compatible input-size parsing.
-
-    Args:
-        ipValue: Contains size of input.
-    Returns:
-        size: Returns the size of input.
-    """
-    units = 0
-    size = 0.0
-
-    value = ""
-
-    # This function would be invoked in a loop - once for each data-type. For  first iteration, ipValue is of type string but after that,
-    # the type of ipValue equals the returntype of prior iteration ie; int. Hence, type check is moved up as first condition.
-    if isinstance(ipValue, int) or ipValue.isnumeric():
-        units = 1
-        value = ipValue
-
-    elif ipValue.find("G") != -1:
-        units = 1024 * 1024 * 1024
-        unitIdx = ipValue.find("G")
-        value = ipValue[0:unitIdx]
-
-    elif ipValue.find("M") != -1:
-        units = 1024 * 1024
-        unitIdx = ipValue.find("M")
-        value = ipValue[0:unitIdx]
-
-    elif ipValue.find("K") != -1:
-        units = 1024
-        unitIdx = ipValue.find("K")
-        value = ipValue[0:unitIdx]
-
-    else:
-        logger.error(f"Could not parse input size {ipValue}")
-        gracefulExit()
-
-    size = int(value) * units
-    return int(size)
-
-
 def parseRankList(ipStr: str) -> List[int]:
     """
     Parses a string into a rank list.
@@ -140,96 +97,6 @@ def parseRankList(ipStr: str) -> List[int]:
             pos = list(map(int, [r.strip() for r in ipStr.split(":")]))
             rankList = [*range(pos[0], pos[1] + 1)]
     return rankList
-
-
-def getAlgBW(elapsedTimeNS: float, dataSize: int, numIters: int) -> Tuple[float, float]:
-    """
-    Similar to how algorithmic bandwidth is computed in nccl-tests.
-
-    Args:
-        elapsedTimeNS: Total elapsed time for run in ns.
-        dataSize: Size in bytes of the data being ran.
-        numIters: Number of iterations for run.
-    Returns:
-        (avgIterNs, algBW): Returns the average amount of time in ns per iteration, and the algBW (GBps) calculated.
-    """
-    avgIterNS = 0.0
-    if numIters != 0:
-        avgIterNS = elapsedTimeNS / numIters
-
-    algBW = 0.0
-    if avgIterNS != 0:
-        algBW = (dataSize) / (avgIterNS)  # dataSize dividied by ns gives us GBps
-    return (avgIterNS, algBW)
-
-
-def getSizes(
-    beginSize: int, endSize: int, stepFactor: int, stepBytes: int
-) -> List[int]:
-    """
-    Gets the sizes of each iteration.
-
-    Args:
-        beginSize: Size of first iteration.
-        endSize: Size of last iteration.
-        stepFactor: Factor that each iteration increases by.
-    Returns:
-        allSizes: List that contains size of each iteration up to endSize.
-    """
-    curSize = beginSize
-    numIters = 0
-    maxIters = 100
-    allSizes = []
-    while curSize <= endSize:
-        allSizes.append(curSize)
-        curSize = curSize * stepFactor if stepBytes == 0 else curSize + stepBytes
-        numIters = numIters + 1
-        if numIters > 100:
-            logger.error(
-                f"For finding allSizes numIters: {numIters} is greater than maxIters: {maxIters}"
-            )
-            break
-    return allSizes
-
-
-def fixBeginSize(commsParams: commsParamsHolder, world_size: int) -> None:
-    """
-    Validate begin size to match other parameters.
-
-    Args:
-        commsParams: Holds beginSize and other parameters to perform validation.
-        world_size: The total number of global ranks.
-    Returns:
-        None
-    """
-    # ensures we will have atleast one member/rank
-    if commsParams.collective in (
-        "all_to_all",
-        "all_to_allv",
-        "all_to_all_single",
-        "all_gather",
-        "all_gather_base",
-        "gather",
-        "reduce_scatter_base",
-    ):
-        if (commsParams.beginSize / commsParams.element_size) < world_size:
-            commsParams.beginSize = world_size * commsParams.element_size
-
-        if (
-            commsParams.bitwidth < 32
-            and (commsParams.beginSize / commsParams.element_size / world_size)
-            < commsParams.quant_a2a_embedding_dim
-        ):
-            commsParams.beginSize = (
-                commsParams.quant_a2a_embedding_dim
-                * world_size
-                * commsParams.element_size
-            )
-    elif (commsParams.collective == "all_reduce") or (
-        commsParams.collective == "reduce"
-    ):
-        if commsParams.beginSize < commsParams.element_size:
-            commsParams.beginSize = commsParams.element_size
 
 
 def get_rank_details(
@@ -799,7 +666,6 @@ class commsParamsHolderBase:
         self.enable_local_report = args.enable_local_report
         self.enable_profiler = args.enable_profiler
         self.use_perf_logger = args.use_perf_logger
-        self.ibv_devices = args.ibv_devices
         self.init_only = args.init_only
 
 
@@ -989,40 +855,6 @@ class paramCommsBench(ABC):
                         raise ValueError(
                             f"[{curSize}-bytes {commsParams.collective}] Wrong value at [{index}] = {tensor[index]}, expected {expRes}\n {tensor}"
                         )
-
-    def setTensorVal(self, tensor: torch.Tensor, useRandVal: bool = True) -> None:
-        """
-        Set tensor value, use initVal if useRandVal is false.
-
-        Args:
-            tensor: Tensor to set value on.
-            useRandVal: Determines whether to use predictable values or not.
-        Returns:
-            None
-        """
-        newVal = random.random() if useRandVal else self.initVal
-        t = tensor[0] if isinstance(tensor, list) else tensor
-        if t.type == torch.bool:
-            newVal = newVal > 0.5
-        # reset values
-        if self.collectiveArgs.collective in ("all_reduce", "reduce"):
-            # all processes use initVal to have predictable results
-            newVal = self.initVal
-        elif self.collectiveArgs.collective in ("broadcast", "multicast"):
-            # root process uses initVal and others use random values
-            newVal = (
-                self.initVal
-                if (self.backendFuncs.get_global_rank() == self.collectiveArgs.srcOrDst)
-                else newVal
-            )
-
-        # reset the tensor(s)
-        if isinstance(tensor, list):
-            # could be a list of tensor, for all_gather, gather, reduce_scatter
-            for t in tensor:
-                t.fill_(newVal)
-        else:
-            tensor.fill_(newVal)
 
     # Collection of prepComm private methods. These methods prepare tensors for the respective collective.
 
@@ -1627,12 +1459,6 @@ class paramCommsBench(ABC):
             default=None,
             help="add name of custom performer loggers to use them in additional to text output, user is responsible to implement and register the custom performance logger",
         )  # use custom performer logger
-        parser.add_argument(
-            "--ibv-devices",
-            type=str,
-            default="",
-            help="list of ib devices to use for distributed communication",
-        )  # experimental feature
         parser.add_argument(
             "--init-only",
             action="store_true",

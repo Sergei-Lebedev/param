@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import torch
 from torch.distributed import ProcessGroup
 
-from .param_profile import paramTimer
+from ..param_profile import paramTimer
 
 logger = logging.getLogger(__name__)
 

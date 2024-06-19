@@ -7,7 +7,7 @@ from typing import List, Tuple
 from .. import ExecutionTrace
 from . import comms_utils
 from .comms_utils import commsArgs
-from .pytorch_backend_utils import supportedP2pOps
+from .backend.base_backend import supportedP2pOps
 
 tensorDtypeMap = {
     "Tensor(int)": "int",
